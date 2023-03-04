@@ -5,7 +5,7 @@
 # Nagios/Icinga Plugin to check expiring/expired certbot certificates
 # https://github.com/lukasic/check-certbot
 #
-# Version: 0.1
+# Version: 0.2
 #
 
 #
@@ -81,6 +81,10 @@ args = parser.parse_args()
 cd = int(args.critical)
 wd = int(args.warning)
 
+if wd < cd:
+  print("Warning value is less than Critical!")
+  sys.exit(3)
+
 warn = False
 crit = False
 
@@ -104,23 +108,54 @@ if not certbot_path:
 data = get_certificates_info(certbot_path)
 c = certbot_output_to_json(data)
 
+perfdata = {
+  'Expired': 0,
+  'InWarning': 0,
+  'InCritical': 0,
+  'OK': 0,
+  'ALL': 0,
+  'MinValidDays': 1000,
+}
+
 for cert in c:
   name = cert["Certificate Name"]
   v = valid_days(cert["Expiry Date"])
+  perfdata['ALL'] += 1
+  if v < perfdata['MinValidDays']:
+    perfdata['MinValidDays'] = v
   if v < 0:
     print("CRITICAL: %s - expired" % name)
+    perfdata['Expired'] += 1
     crit = True
   elif v < cd:
     print("CRITICAL: %s - expires in %d days" % (name, v))
+    perfdata['InCritical'] += 1
     crit = True
   elif v < wd:
     print("WARNING: %s - expires in %d days" % (name, v))
+    perfdata['InWarning'] += 1
     warn = True
+  else:
+    perfdata['OK'] += 1
 
 if crit:
-  sys.exit(2)
+  retcode = 2
 elif warn:
-  sys.exit(1)
+  retcode = 1
 else:
-  sys.exit(0)
+  print("No certificate expired nor expiring soon.")
+  retcode = 0
 
+perfdata_format = "| Expired=%d;;;; InWarning=%d;;;; InCritical=%d;;;; OK=%d;;;; ALL=%d;;;; MinValidDays=%d;%d;%d;;" % (
+    perfdata['Expired'],
+    perfdata['InWarning'],
+    perfdata['InCritical'],
+    perfdata['OK'],
+    perfdata['ALL'],
+    perfdata['MinValidDays'],
+    wd,
+    cd
+  )
+print(perfdata_format)
+
+sys.exit(retcode)
